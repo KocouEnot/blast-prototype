@@ -91,6 +91,9 @@
       },
       {
         "__id__": 34
+      },
+      {
+        "__id__": 35
       }
     ],
     "_prefab": null,
@@ -1411,5 +1414,18 @@
     },
     "_enabled": true,
     "_id": "4d+klIpmNKCYYy/Yatowsw"
+  },
+  {
+    "__type__": "6c944rfeHxMipdJEtVypWVd",
+    "_name": "",
+    "_objFlags": 0,
+    "node": {
+      "__id__": 2
+    },
+    "_enabled": true,
+    "rotateOverlay": {
+      "__id__": 25
+    },
+    "_id": "53W2dsaQxJOI22vwRRQrRb"
   }
 ]
