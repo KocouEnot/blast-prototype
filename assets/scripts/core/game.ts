@@ -10,3 +10,4 @@ export default class Game extends cc.Component {
         cc.log("[Game] start")
     }
 }
+

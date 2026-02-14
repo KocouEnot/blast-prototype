@@ -15,12 +15,17 @@ export default class CoverBackground extends cc.Component {
     }
 
     private applyCover() {
+
+        // guard clause
         if (!this._sprite || !this._sprite.spriteFrame) return;
 
+        // currently size scene
         const win = cc.winSize;
 
+        // currently size image
         const img = this._sprite.spriteFrame.getOriginalSize();
 
+        // the maximum value of the scaling factors
         const scale = Math.max(win.width / img.width, win.height / img.height);
 
         this.node.setPosition(0, 0);

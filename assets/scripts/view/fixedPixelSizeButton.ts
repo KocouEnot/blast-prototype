@@ -3,10 +3,10 @@ const { ccclass, property } = cc._decorator;
 @ccclass
 export default class FixedPixelSizeButton extends cc.Component {
     @property
-    paddingX: number = 24;
+    paddingX: number = 60;
 
     @property
-    paddingY: number = 24;
+    paddingY: number = 60;
 
     private baseScaleX = 1;
     private baseScaleY = 1;
@@ -30,20 +30,20 @@ export default class FixedPixelSizeButton extends cc.Component {
     }
 
     private apply() {
-        const design = cc.view.getDesignResolutionSize(); // то, что ты выставляешь в setDesignResolutionSize
-        const frame = cc.view.getFrameSize();            // реальный размер окна (px)
+        const design = cc.view.getDesignResolutionSize();
+        const frame = cc.view.getFrameSize();
 
-        // NO_BORDER scale, который применяется ко всей сцене
+        // NO_BORDER scale, which applies to the entire scene
         const viewScale = Math.max(frame.width / design.width, frame.height / design.height);
 
-        // компенсация, чтобы итоговый размер кнопки на экране оставался постоянным
+        // compensation so that the final size of the button on the screen remains constant
         const inv = 1 / viewScale;
 
-        // “константный” размер кнопки на экране в пикселях (после компенсации)
+        // “constant” size of the button on the screen in pixels (after compensation)
         const constWpx = this.baseW * this.baseScaleX;
         const constHpx = this.baseH * this.baseScaleY;
 
-        // если не влезает — уменьшаем дополнительно
+        // if it doesn’t fit, reduce it further
         const availW = Math.max(1, frame.width - this.paddingX * 2);
         const availH = Math.max(1, frame.height - this.paddingY * 2);
 
