@@ -14,6 +14,18 @@ export default class BoardView extends cc.Component {
     @property(cc.Node)
     maskNode: cc.Node = null;
 
+    @property(cc.Label)
+    movesLabel: cc.Label = null;
+
+    @property(cc.Node)
+    gameOverOverlay: cc.Node = null;
+
+    @property(cc.Node)
+    gameOverDim: cc.Node = null;
+
+    @property(cc.Label)
+    gameOverLabel: cc.Label = null;
+
     // how much higher than the top row new ones start (in pixels)
     @property
     spawnAboveTop: number = 112;
@@ -33,18 +45,24 @@ export default class BoardView extends cc.Component {
     @property
     overlapY: number = 0;
 
+    // animation
     @property
     shakeDuration: number = 0.12;
 
     @property
     shakeOffset: number = 10; // px
 
-    // animation
     @property
     removeDuration: number = 0.12;
 
     @property
     fallDuration: number = 0.18;
+
+    @property
+    startMoves: number = 40;
+
+    @property
+    gameOverFade: number = 0.25;
 
     private model: BoardModel = null;
     private nodes: (cc.Node | null)[][] = [];
@@ -57,6 +75,10 @@ export default class BoardView extends cc.Component {
     private boardWidth: number = 0;
     private boardHeight: number = 0;
     private startX: number = 0;
+
+    private movesLeft: number = 0;
+    private isGameOver: boolean = false;
+
 
     start() {
         if (!this.tilePrefab || !this.cellsContainer) {
@@ -71,8 +93,29 @@ export default class BoardView extends cc.Component {
         this.rowGap = Math.max(0, this.rowGap);
         this.colGap = Math.max(0, this.colGap);
         this.overlapY = Math.max(0, this.overlapY);
+        this.movesLeft = this.startMoves;
+        this.updateMovesLabel();
+
+        this.isGameOver = false;
+
+        if (this.gameOverOverlay) {
+            this.gameOverOverlay.active = false;
+        }
+
+        if (this.gameOverDim) {
+            this.gameOverDim.opacity = 0;
+        }
+
+        if (this.gameOverLabel) {
+            this.gameOverLabel.node.opacity = 255;
+            this.gameOverLabel.string = "GAME OVER";
+        }
 
         this.build();
+    }
+
+    private updateMovesLabel(): void {
+        if (this.movesLabel) this.movesLabel.string = String(this.movesLeft);
     }
 
     private build(): void {
@@ -182,26 +225,58 @@ export default class BoardView extends cc.Component {
 
     private async onTileClick(r: number, c: number): Promise<void> {
         if (this.isBusy) return;
+        if (this.isGameOver) return;
+        if (this.movesLeft <= 0) return;
+
 
         const t = this.model.get(r, c);
         if (t === null) return;
 
         const cluster = this.model.findCluster(r, c);
+
         if (cluster.length < 3) {
-            // We don’t block the game for a long time, just visual feedback
             await this.shakeBoard();
             return;
         }
 
         this.isBusy = true;
 
-        // 1) removve
-        await this.removeCluster(cluster);
+        // we spend a turn only on a valid explosion
+        this.movesLeft -= 1;
+        this.updateMovesLabel();
 
-        // 2) gravity + respawn
+        if (this.movesLeft <= 0) {
+            this.showGameOver();
+        }
+
+        await this.removeCluster(cluster);
         await this.applyGravityAndRefill();
 
         this.isBusy = false;
+    }
+
+    private showGameOver(): void {
+        if (this.isGameOver) return;
+        this.isGameOver = true;
+
+        if (!this.gameOverOverlay || !this.gameOverDim || !this.gameOverLabel) return;
+
+        // ensure that the overlay is on top of the UICanvas
+        const p = this.gameOverOverlay.parent;
+        if (p) this.gameOverOverlay.setSiblingIndex(p.childrenCount - 1);
+        this.gameOverOverlay.zIndex = 9999;
+
+        this.gameOverOverlay.active = true;
+
+        this.gameOverDim.stopAllActions();
+        this.gameOverDim.opacity = 0;
+
+        // label the label bright
+        this.gameOverLabel.node.opacity = 255;
+
+        cc.tween(this.gameOverDim)
+            .to(this.gameOverFade, { opacity: 180 })
+            .start();
     }
 
     private async removeCluster(
