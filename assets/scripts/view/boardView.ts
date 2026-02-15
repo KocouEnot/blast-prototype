@@ -26,6 +26,9 @@ export default class BoardView extends cc.Component {
     @property(cc.Label)
     gameOverLabel: cc.Label = null;
 
+    @property(cc.Label)
+    scoreLabel: cc.Label = null;
+
     // how much higher than the top row new ones start (in pixels)
     @property
     spawnAboveTop: number = 112;
@@ -64,6 +67,9 @@ export default class BoardView extends cc.Component {
     @property
     gameOverFade: number = 0.25;
 
+    @property
+    targetScore: number = 300;
+
     private model: BoardModel = null;
     private nodes: (cc.Node | null)[][] = [];
     private isBusy: boolean = false;
@@ -79,6 +85,8 @@ export default class BoardView extends cc.Component {
     private movesLeft: number = 0;
     private isGameOver: boolean = false;
 
+    private currentScore: number = 0;
+    private isWin: boolean = false;
 
     start() {
         if (!this.tilePrefab || !this.cellsContainer) {
@@ -89,6 +97,9 @@ export default class BoardView extends cc.Component {
             cc.error("[BoardView] board_root width is 0");
             return;
         }
+
+        this.currentScore = 0;
+        this.updateScoreLabel();
 
         this.rowGap = Math.max(0, this.rowGap);
         this.colGap = Math.max(0, this.colGap);
@@ -256,6 +267,8 @@ export default class BoardView extends cc.Component {
     }
 
     private showGameOver(): void {
+        this.gameOverLabel.string = "GAME OVER";
+        if (this.isWin) return;
         if (this.isGameOver) return;
         this.isGameOver = true;
 
@@ -279,9 +292,22 @@ export default class BoardView extends cc.Component {
             .start();
     }
 
+    private updateScoreLabel(): void {
+        if (!this.scoreLabel) return;
+        this.scoreLabel.string = `${this.currentScore}/${this.targetScore}`;
+    }
+
     private async removeCluster(
         cluster: Array<{ r: number; c: number }>
     ): Promise<void> {
+
+        if (cluster.length < 3) {
+            this.shakeBoard();
+            return;
+        }
+
+        this.addScore(cluster.length);
+
         this.model.clearCells(cluster);
 
         const tweens: Promise<void>[] = [];
@@ -305,6 +331,46 @@ export default class BoardView extends cc.Component {
         }
 
         await Promise.all(tweens);
+    }
+
+    private addScore(count: number): void {
+        const gained = 2 * count - 1; // 3->5, 4->7, 5->9...
+        this.currentScore = Math.min(this.targetScore, this.currentScore + gained);
+        this.updateScoreLabel();
+
+        if (!this.isWin && this.currentScore >= this.targetScore) {
+            this.showWin();
+        }
+    }
+
+    private showWin(): void {
+        if (this.isWin) return;
+        this.isWin = true;
+
+        // блокируем дальнейшие клики
+        this.isGameOver = true;
+
+        // используем тот же overlay
+        if (!this.gameOverOverlay || !this.gameOverDim || !this.gameOverLabel) return;
+
+        // делаем overlay самым верхним
+        const parent = this.gameOverOverlay.parent;
+        if (parent) this.gameOverOverlay.setSiblingIndex(parent.childrenCount - 1);
+        this.gameOverOverlay.zIndex = 9999;
+
+        this.gameOverOverlay.active = true;
+
+        // затемнение
+        this.gameOverDim.stopAllActions();
+        this.gameOverDim.opacity = 0;
+
+        // текст победы
+        this.gameOverLabel.string = "YOU WIN";
+        this.gameOverLabel.node.opacity = 255;
+
+        cc.tween(this.gameOverDim)
+            .to(this.gameOverFade, { opacity: 180 })
+            .start();
     }
 
     private async applyGravityAndRefill(): Promise<void> {
