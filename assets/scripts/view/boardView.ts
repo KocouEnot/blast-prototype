@@ -33,6 +33,12 @@ export default class BoardView extends cc.Component {
     @property
     overlapY: number = 0;
 
+    @property
+    shakeDuration: number = 0.12;
+
+    @property
+    shakeOffset: number = 10; // px
+
     // animation
     @property
     removeDuration: number = 0.12;
@@ -150,6 +156,30 @@ export default class BoardView extends cc.Component {
         return tileNode;
     }
 
+    private shakeBoard(): Promise<void> {
+        // we shake the cellsContainer (inside the mask) so as not to break the layout/mask
+        const n = this.cellsContainer;
+
+        // if we're already shaking, restart
+        n.stopAllActions();
+
+        const startX = n.x;
+        const startY = n.y;
+
+        return new Promise<void>((resolve) => {
+            cc.tween(n)
+                .to(this.shakeDuration * 0.25, { x: startX - this.shakeOffset })
+                .to(this.shakeDuration * 0.25, { x: startX + this.shakeOffset })
+                .to(this.shakeDuration * 0.25, { x: startX - this.shakeOffset * 0.6 })
+                .to(this.shakeDuration * 0.25, { x: startX })
+                .call(() => {
+                    n.setPosition(startX, startY);
+                    resolve();
+                })
+                .start();
+        });
+    }
+
     private async onTileClick(r: number, c: number): Promise<void> {
         if (this.isBusy) return;
 
@@ -157,7 +187,11 @@ export default class BoardView extends cc.Component {
         if (t === null) return;
 
         const cluster = this.model.findCluster(r, c);
-        if (cluster.length < 3) return;
+        if (cluster.length < 3) {
+            // We don’t block the game for a long time, just visual feedback
+            await this.shakeBoard();
+            return;
+        }
 
         this.isBusy = true;
 
