@@ -11,6 +11,13 @@ export default class BoardView extends cc.Component {
     @property(cc.Node)
     cellsContainer: cc.Node = null;
 
+    @property(cc.Node)
+    maskNode: cc.Node = null;
+
+    // how much higher than the top row new ones start (in pixels)
+    @property
+    spawnAboveTop: number = 112;
+
     @property
     cols: number = 9;
 
@@ -104,6 +111,12 @@ export default class BoardView extends cc.Component {
 
         this.boardHeight = this.cellSize + (this.rows - 1) * this.stepY;
 
+        if (this.maskNode) {
+            this.maskNode.width = this.boardWidth;
+            this.maskNode.height = this.boardHeight;
+            this.maskNode.setPosition(0, 0);
+        }
+
         this.node.height = this.boardHeight;
         this.cellsContainer.width = this.boardWidth;
         this.cellsContainer.height = this.boardHeight;
@@ -157,7 +170,9 @@ export default class BoardView extends cc.Component {
         this.isBusy = false;
     }
 
-    private removeCluster(cluster: Array<{ r: number; c: number }>): Promise<void> {
+    private async removeCluster(
+        cluster: Array<{ r: number; c: number }>
+    ): Promise<void> {
         this.model.clearCells(cluster);
 
         const tweens: Promise<void>[] = [];
@@ -180,10 +195,10 @@ export default class BoardView extends cc.Component {
             );
         }
 
-        return Promise.all(tweens).then(() => undefined);
+        await Promise.all(tweens);
     }
 
-    private applyGravityAndRefill(): Promise<void> {
+    private async applyGravityAndRefill(): Promise<void> {
         const moveTweens: Promise<void>[] = [];
 
         // 1) move existing ones down
@@ -233,8 +248,12 @@ export default class BoardView extends cc.Component {
                 this.nodes[r][c] = node;
 
                 // starting position - above the upper limit so that it “falls”
-                const spawnY = this.boardHeight / 2 + this.cellSize / 2 + (write - r + 1) * this.stepY;
+                const topY = this.boardHeight / 2 - this.cellSize / 2;
                 const spawnX = this.startX + c * this.stepX;
+
+                // start just above the top row, but this will be cut off by the mask and will not fit into the UI
+                const spawnY = topY + Math.max(0, this.spawnAboveTop);
+
                 node.setPosition(spawnX, spawnY);
                 node.scale = 1;
 
@@ -251,6 +270,6 @@ export default class BoardView extends cc.Component {
             }
         }
 
-        return Promise.all(moveTweens).then(() => undefined);
+        await Promise.all(moveTweens);
     }
 }
