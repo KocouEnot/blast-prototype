@@ -1,7 +1,8 @@
 const { ccclass, property } = cc._decorator;
 
-import BoardModel, { TileType } from "../model/boardModel";
+import { TileType } from "../model/boardModel";
 import TileView from "./tileView";
+import BoardLogic, { CellPos, ShuffleMapping, GravityMove, GravitySpawn } from "../core/boardLogic";
 
 @ccclass
 export default class BoardView extends cc.Component {
@@ -70,7 +71,11 @@ export default class BoardView extends cc.Component {
     @property
     targetScore: number = 300;
 
-    private model: BoardModel = null;
+    @property
+    shuffleDuration: number = 0.25;
+
+    private logic: BoardLogic = null;
+
     private nodes: (cc.Node | null)[][] = [];
     private isBusy: boolean = false;
 
@@ -82,12 +87,6 @@ export default class BoardView extends cc.Component {
     private boardHeight: number = 0;
     private startX: number = 0;
 
-    private movesLeft: number = 0;
-    private isGameOver: boolean = false;
-
-    private currentScore: number = 0;
-    private isWin: boolean = false;
-
     start() {
         if (!this.tilePrefab || !this.cellsContainer) {
             cc.error("[BoardView] tilePrefab/cellsContainer not assigned");
@@ -98,51 +97,57 @@ export default class BoardView extends cc.Component {
             return;
         }
 
-        this.currentScore = 0;
-        this.updateScoreLabel();
-
         this.rowGap = Math.max(0, this.rowGap);
         this.colGap = Math.max(0, this.colGap);
         this.overlapY = Math.max(0, this.overlapY);
-        this.movesLeft = this.startMoves;
-        this.updateMovesLabel();
 
-        this.isGameOver = false;
-
-        if (this.gameOverOverlay) {
-            this.gameOverOverlay.active = false;
-        }
-
-        if (this.gameOverDim) {
-            this.gameOverDim.opacity = 0;
-        }
-
+        // overlay init
+        if (this.gameOverOverlay) this.gameOverOverlay.active = false;
+        if (this.gameOverDim) this.gameOverDim.opacity = 0;
         if (this.gameOverLabel) {
             this.gameOverLabel.node.opacity = 255;
             this.gameOverLabel.string = "GAME OVER";
         }
 
-        this.build();
+        // logic init
+        this.logic = new BoardLogic();
+        this.logic.init({
+            rows: this.rows,
+            cols: this.cols,
+            colorsCount: 5,
+            startMoves: this.startMoves,
+            targetScore: this.targetScore,
+        });
+
+        this.updateMovesLabel();
+        this.updateScoreLabel();
+
+        this.buildViewFromModel();
     }
 
     private updateMovesLabel(): void {
-        if (this.movesLabel) this.movesLabel.string = String(this.movesLeft);
+        if (!this.movesLabel || !this.logic) return;
+        this.movesLabel.string = String(this.logic.getMovesLeft());
     }
 
-    private build(): void {
-        this.cellsContainer.removeAllChildren();
+    private updateScoreLabel(): void {
+        if (!this.scoreLabel || !this.logic) return;
+        this.scoreLabel.string = `${this.logic.getCurrentScore()}/${this.logic.getTargetScore()}`;
+    }
 
-        this.model = new BoardModel(this.rows, this.cols);
-        this.model.fillRandom(5);
+    private buildViewFromModel(): void {
+        this.cellsContainer.removeAllChildren();
 
         this.computeLayout();
 
-        this.nodes = Array.from({ length: this.rows }, () => Array.from({ length: this.cols }, () => null));
+        this.nodes = Array.from({ length: this.rows }, () =>
+            Array.from({ length: this.cols }, () => null)
+        );
 
-        // draw from bottom to top: the top ones are always on top of the bottom ones
+        // draw from bottom to top
         for (let r = this.rows - 1; r >= 0; r--) {
             for (let c = 0; c < this.cols; c++) {
-                const type = this.model.get(r, c) as TileType;
+                const type = this.logic.getType(r, c) as TileType;
                 const node = this.createTileNode(r, c, type);
                 node.setPosition(this.cellPos(r, c));
                 this.nodes[r][c] = node;
@@ -211,10 +216,7 @@ export default class BoardView extends cc.Component {
     }
 
     private shakeBoard(): Promise<void> {
-        // we shake the cellsContainer (inside the mask) so as not to break the layout/mask
         const n = this.cellsContainer;
-
-        // if we're already shaking, restart
         n.stopAllActions();
 
         const startX = n.x;
@@ -236,45 +238,56 @@ export default class BoardView extends cc.Component {
 
     private async onTileClick(r: number, c: number): Promise<void> {
         if (this.isBusy) return;
-        if (this.isGameOver) return;
-        if (this.movesLeft <= 0) return;
+        if (!this.logic) return;
 
+        const res = this.logic.handleClick(r, c);
 
-        const t = this.model.get(r, c);
-        if (t === null) return;
+        if (res.kind === "ignored") return;
 
-        const cluster = this.model.findCluster(r, c);
-
-        if (cluster.length < 3) {
+        if (res.kind === "shake") {
             await this.shakeBoard();
             return;
         }
 
         this.isBusy = true;
+        try {
+            // UI: moves/score update immediately (logic уже обновила)
+            this.updateMovesLabel();
+            this.updateScoreLabel();
 
-        // we spend a turn only on a valid explosion
-        this.movesLeft -= 1;
-        this.updateMovesLabel();
+            // 1) анимация удаления (view)
+            await this.animateRemoveCluster(res.cluster);
 
-        if (this.movesLeft <= 0) {
-            this.showGameOver();
+            // 2) гравитация + refill (logic) -> анимация падения/спавна (view)
+            const gravity = this.logic.applyGravityAndRefill();
+            await this.animateGravityAndRefill(gravity.moves, gravity.spawns);
+
+            // 3) shuffle (logic) -> shuffle animation (view)
+            const resShuffle = this.logic.ensurePlayableOrGameOver(3);
+
+            for (const mapping of resShuffle.shuffles) {
+                await this.animateShuffle(mapping);
+            }
+
+            // 4) overlay
+            if (this.logic.getIsWin()) {
+                this.showOverlay("YOU WIN");
+                return;
+            }
+            if (this.logic.getIsGameOver() || resShuffle.ended) {
+                this.showOverlay("GAME OVER");
+                return;
+            }
+        } finally {
+            this.isBusy = false;
         }
-
-        await this.removeCluster(cluster);
-        await this.applyGravityAndRefill();
-
-        this.isBusy = false;
     }
 
-    private showGameOver(): void {
-        this.gameOverLabel.string = "GAME OVER";
-        if (this.isWin) return;
-        if (this.isGameOver) return;
-        this.isGameOver = true;
-
+    private showOverlay(text: string): void {
         if (!this.gameOverOverlay || !this.gameOverDim || !this.gameOverLabel) return;
 
-        // ensure that the overlay is on top of the UICanvas
+        this.gameOverLabel.string = text;
+
         const p = this.gameOverOverlay.parent;
         if (p) this.gameOverOverlay.setSiblingIndex(p.childrenCount - 1);
         this.gameOverOverlay.zIndex = 9999;
@@ -284,7 +297,6 @@ export default class BoardView extends cc.Component {
         this.gameOverDim.stopAllActions();
         this.gameOverDim.opacity = 0;
 
-        // label the label bright
         this.gameOverLabel.node.opacity = 255;
 
         cc.tween(this.gameOverDim)
@@ -292,24 +304,7 @@ export default class BoardView extends cc.Component {
             .start();
     }
 
-    private updateScoreLabel(): void {
-        if (!this.scoreLabel) return;
-        this.scoreLabel.string = `${this.currentScore}/${this.targetScore}`;
-    }
-
-    private async removeCluster(
-        cluster: Array<{ r: number; c: number }>
-    ): Promise<void> {
-
-        if (cluster.length < 3) {
-            this.shakeBoard();
-            return;
-        }
-
-        this.addScore(cluster.length);
-
-        this.model.clearCells(cluster);
-
+    private async animateRemoveCluster(cluster: CellPos[]): Promise<void> {
         const tweens: Promise<void>[] = [];
 
         for (const { r, c } of cluster) {
@@ -319,10 +314,11 @@ export default class BoardView extends cc.Component {
 
             tweens.push(
                 new Promise<void>((resolve) => {
+                    if (!cc.isValid(node)) return resolve();
                     cc.tween(node)
                         .to(this.removeDuration, { scale: 0 })
                         .call(() => {
-                            node.destroy();
+                            if (cc.isValid(node)) node.destroy();
                             resolve();
                         })
                         .start();
@@ -333,118 +329,112 @@ export default class BoardView extends cc.Component {
         await Promise.all(tweens);
     }
 
-    private addScore(count: number): void {
-        const gained = 2 * count - 1; // 3->5, 4->7, 5->9...
-        this.currentScore = Math.min(this.targetScore, this.currentScore + gained);
-        this.updateScoreLabel();
+    private async animateGravityAndRefill(moves: GravityMove[], spawns: GravitySpawn[]): Promise<void> {
+        const tweens: Promise<void>[] = [];
 
-        if (!this.isWin && this.currentScore >= this.targetScore) {
-            this.showWin();
-        }
-    }
+        // 1) перемещения вниз
+        for (const m of moves) {
+            const node = this.nodes[m.fromR][m.c];
+            this.nodes[m.fromR][m.c] = null;
+            this.nodes[m.toR][m.c] = node;
 
-    private showWin(): void {
-        if (this.isWin) return;
-        this.isWin = true;
+            if (!node || !cc.isValid(node)) continue;
 
-        // блокируем дальнейшие клики
-        this.isGameOver = true;
+            const view = node.getComponent(TileView);
+            if (view) view.setGridPos(m.toR, m.c);
 
-        // используем тот же overlay
-        if (!this.gameOverOverlay || !this.gameOverDim || !this.gameOverLabel) return;
+            const target = this.cellPos(m.toR, m.c);
 
-        // делаем overlay самым верхним
-        const parent = this.gameOverOverlay.parent;
-        if (parent) this.gameOverOverlay.setSiblingIndex(parent.childrenCount - 1);
-        this.gameOverOverlay.zIndex = 9999;
-
-        this.gameOverOverlay.active = true;
-
-        // затемнение
-        this.gameOverDim.stopAllActions();
-        this.gameOverDim.opacity = 0;
-
-        // текст победы
-        this.gameOverLabel.string = "YOU WIN";
-        this.gameOverLabel.node.opacity = 255;
-
-        cc.tween(this.gameOverDim)
-            .to(this.gameOverFade, { opacity: 180 })
-            .start();
-    }
-
-    private async applyGravityAndRefill(): Promise<void> {
-        const moveTweens: Promise<void>[] = [];
-
-        // 1) move existing ones down
-        for (let c = 0; c < this.cols; c++) {
-            let write = this.rows - 1;
-
-            for (let r = this.rows - 1; r >= 0; r--) {
-                const cell = this.model.get(r, c);
-                if (cell === null) continue;
-
-                if (r !== write) {
-                    // модель
-                    this.model.set(write, c, cell);
-                    this.model.set(r, c, null);
-
-                    // вью
-                    const node = this.nodes[r][c];
-                    this.nodes[write][c] = node;
-                    this.nodes[r][c] = null;
-
-                    if (node) {
-                        const view = node.getComponent(TileView);
-                        if (view) view.setGridPos(write, c);
-
-                        const target = this.cellPos(write, c);
-
-                        moveTweens.push(
-                            new Promise<void>((resolve) => {
-                                cc.tween(node)
-                                    .to(this.fallDuration, { x: target.x, y: target.y })
-                                    .call(resolve)
-                                    .start();
-                            })
-                        );
-                    }
-                }
-
-                write--;
-            }
-
-            // 2) spawn new ones into empty ones [0..write]
-            for (let r = write; r >= 0; r--) {
-                const type = this.model.randomType(5);
-                this.model.set(r, c, type);
-
-                const node = this.createTileNode(r, c, type);
-                this.nodes[r][c] = node;
-
-                // starting position - above the upper limit so that it “falls”
-                const topY = this.boardHeight / 2 - this.cellSize / 2;
-                const spawnX = this.startX + c * this.stepX;
-
-                // start just above the top row, but this will be cut off by the mask and will not fit into the UI
-                const spawnY = topY + Math.max(0, this.spawnAboveTop);
-
-                node.setPosition(spawnX, spawnY);
-                node.scale = 1;
-
-                const target = this.cellPos(r, c);
-
-                moveTweens.push(
-                    new Promise<void>((resolve) => {
-                        cc.tween(node)
-                            .to(this.fallDuration, { x: target.x, y: target.y })
-                            .call(resolve)
-                            .start();
-                    })
-                );
-            }
+            tweens.push(
+                new Promise<void>((resolve) => {
+                    if (!cc.isValid(node)) return resolve();
+                    cc.tween(node)
+                        .to(this.fallDuration, { x: target.x, y: target.y })
+                        .call(resolve)
+                        .start();
+                })
+            );
         }
 
-        await Promise.all(moveTweens);
+        // 2) спавн новых (падают внутри маски)
+        for (const s of spawns) {
+            const node = this.createTileNode(s.r, s.c, s.type);
+            this.nodes[s.r][s.c] = node;
+
+            const topY = this.boardHeight / 2 - this.cellSize / 2;
+            const spawnX = this.startX + s.c * this.stepX;
+            const spawnY = topY + Math.max(0, this.spawnAboveTop);
+
+            node.setPosition(spawnX, spawnY);
+            node.scale = 1;
+
+            const target = this.cellPos(s.r, s.c);
+
+            tweens.push(
+                new Promise<void>((resolve) => {
+                    if (!cc.isValid(node)) return resolve();
+                    cc.tween(node)
+                        .to(this.fallDuration, { x: target.x, y: target.y })
+                        .call(resolve)
+                        .start();
+                })
+            );
+        }
+
+        await Promise.all(tweens);
+
+        // восстановим порядок отрисовки
+        this.reorderByRows();
+    }
+
+    private async animateShuffle(mapping: ShuffleMapping): Promise<void> {
+        const tweens: Promise<void>[] = [];
+
+        // соберём новые позиции нод
+        const nextNodes: (cc.Node | null)[][] = Array.from({ length: this.rows }, () =>
+            Array.from({ length: this.cols }, () => null)
+        );
+
+        for (const m of mapping) {
+            const node = this.nodes[m.fromR][m.fromC];
+            if (!node) continue;
+
+            nextNodes[m.toR][m.toC] = node;
+
+            const view = node.getComponent(TileView);
+            if (view) view.setGridPos(m.toR, m.toC);
+
+            const target = this.cellPos(m.toR, m.toC);
+
+            tweens.push(
+                new Promise<void>((resolve) => {
+                    if (!cc.isValid(node)) return resolve();
+                    cc.tween(node)
+                        .to(this.shuffleDuration, { x: target.x, y: target.y })
+                        .call(resolve)
+                        .start();
+                })
+            );
+        }
+
+        await Promise.all(tweens);
+
+        // применяем новую матрицу
+        this.nodes = nextNodes;
+
+        // восстановим порядок отрисовки: снизу вверх
+        this.reorderByRows();
+    }
+
+    private reorderByRows(): void {
+        if (!this.cellsContainer) return;
+
+        // sibling index: сначала нижние ряды, затем верхние
+        for (let r = this.rows - 1; r >= 0; r--) {
+            for (let c = 0; c < this.cols; c++) {
+                const node = this.nodes[r][c];
+                if (node) node.setSiblingIndex(this.cellsContainer.childrenCount - 1);
+            }
+        }
     }
 }

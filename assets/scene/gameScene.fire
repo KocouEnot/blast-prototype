@@ -4384,6 +4384,9 @@
     "gameOverLabel": {
       "__id__": 105
     },
+    "scoreLabel": {
+      "__id__": 54
+    },
     "spawnAboveTop": 112,
     "cols": 9,
     "rows": 10,
@@ -4396,6 +4399,8 @@
     "fallDuration": 0.2,
     "startMoves": 40,
     "gameOverFade": 0.25,
+    "targetScore": 250,
+    "shuffleDuration": 0.25,
     "_id": "1fv7oas+BEG75lK61Fgn5q"
   },
   {
