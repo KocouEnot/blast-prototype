@@ -2,64 +2,91 @@ const { ccclass, property } = cc._decorator;
 
 @ccclass
 export default class BoosterButton extends cc.Component {
+    // glowLeft/glowCenter/glowRight (копии твоих left/center/right)
+    @property([cc.Node])
+    glowParts: cc.Node[] = [];
+
+    // Можно добавить лёгкое свечение/прозрачность
     @property
-    pressedScale: number = 0.92; // "вдавливание"
+    glowOpacityOn: number = 230;
 
     @property
-    activeGlowOpacity: number = 140; // подсветка (alpha)
+    glowFadeDuration: number = 0.08;
 
-    @property(cc.Node)
-    glowNode: cc.Node = null; // нода подсветки (sprite/overlay), optional
+    // эффект нажатия (вдавливание)
+    @property
+    pressedScale: number = 0.95;
 
-    private isActive: boolean = false;
-    private baseScale: number = 1;
+    @property
+    pressDuration: number = 0.06;
 
-    onLoad() {
-        this.baseScale = this.node.scale;
+    private _isActive: boolean = false;
+    private _baseScaleX: number = 1;
+    private _baseScaleY: number = 1;
 
-        // стартовое состояние
-        if (this.glowNode) this.glowNode.opacity = 0;
+    onLoad(): void {
+        this._baseScaleX = this.node.scaleX;
+        this._baseScaleY = this.node.scaleY;
 
+        // стартовое состояние glow
+        this.setGlow(false, true);
+
+        // клик по контейнеру кнопки
+        this.node.off(cc.Node.EventType.TOUCH_END);
         this.node.on(cc.Node.EventType.TOUCH_END, this.onClick, this);
     }
 
-    onDestroy() {
-        this.node.off(cc.Node.EventType.TOUCH_END, this.onClick, this);
+    public isActive(): boolean {
+        return this._isActive;
     }
 
-    public getActive(): boolean {
-        return this.isActive;
-    }
+    public setActive(active: boolean): void {
+        if (this._isActive === active) return;
+        this._isActive = active;
 
-    public setActive(v: boolean): void {
-        if (this.isActive === v) return;
-        this.isActive = v;
-        this.applyVisual(v);
+        this.animatePress(active);
+        this.setGlow(active, false);
     }
 
     public toggle(): void {
-        this.setActive(!this.isActive);
+        this.setActive(!this._isActive);
     }
 
     private onClick(): void {
-        // наружу отдаём событие, чтобы менеджер мог снять активность с других
-        this.node.emit("booster-toggle", this);
+        this.node.emit("booster-click", this);
     }
 
-    private applyVisual(active: boolean): void {
+    private animatePress(active: boolean): void {
         this.node.stopAllActions();
-        if (this.glowNode) this.glowNode.stopAllActions();
 
-        const targetScale = active ? this.baseScale * this.pressedScale : this.baseScale;
+        const targetX = this._baseScaleX * (active ? this.pressedScale : 1);
+        const targetY = this._baseScaleY * (active ? this.pressedScale : 1);
 
         cc.tween(this.node)
-            .to(0.08, { scale: targetScale })
+            .to(this.pressDuration, { scaleX: targetX, scaleY: targetY })
             .start();
+    }
 
-        if (this.glowNode) {
-            cc.tween(this.glowNode)
-                .to(0.08, { opacity: active ? this.activeGlowOpacity : 0 })
-                .start();
+    private setGlow(active: boolean, immediate: boolean): void {
+        if (!this.glowParts || this.glowParts.length === 0) return;
+
+        const targetOpacity = active ? this.glowOpacityOn : 0;
+
+        for (const n of this.glowParts) {
+            if (!n || !cc.isValid(n)) continue;
+
+            n.stopAllActions();
+
+            // glow должен быть видимым как нода (active=true), а интенсивность через opacity
+            n.active = true;
+
+            if (immediate || this.glowFadeDuration <= 0) {
+                n.opacity = targetOpacity;
+            } else {
+                cc.tween(n)
+                    .to(this.glowFadeDuration, { opacity: targetOpacity })
+                    .start();
+            }
         }
     }
 }
