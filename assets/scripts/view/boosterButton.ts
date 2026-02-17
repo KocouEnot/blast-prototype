@@ -9,14 +9,14 @@ export default class BoosterButton extends cc.Component {
     @property(cc.Label)
     countLabel: cc.Label = null;
 
-    // Можно добавить лёгкое свечение/прозрачность
+    // You can add a slight glow/transparency
     @property
     glowOpacityOn: number = 230;
 
     @property
     glowFadeDuration: number = 0.08;
 
-    // эффект нажатия (вдавливание)
+    // pressing effect (indentation)
     @property
     pressedScale: number = 0.95;
 
@@ -41,10 +41,10 @@ export default class BoosterButton extends cc.Component {
         this.count = this.startCount;
         this.refreshCount();
 
-        // стартовое состояние glow
+        // starting state glow
         this.setGlow(false, true);
 
-        // клик по контейнеру кнопки
+        // click on the button container
         this.node.off(cc.Node.EventType.TOUCH_END);
         this.node.on(cc.Node.EventType.TOUCH_END, this.onClick, this);
     }
@@ -91,7 +91,7 @@ export default class BoosterButton extends cc.Component {
 
             n.stopAllActions();
 
-            // glow должен быть видимым как нода (active=true), а интенсивность через opacity
+            // glow should be visible as a node (active=true), and intensity via opacity
             n.active = true;
 
             if (immediate || this.glowFadeDuration <= 0) {
@@ -118,10 +118,10 @@ export default class BoosterButton extends cc.Component {
     private refreshCount(): void {
         if (this.countLabel) this.countLabel.string = String(this.count);
 
-        // если кончились — визуально можно "задимить", но не обязательно
+        // If you run out, you can visually "light up" it, but it's not necessary
         if (this.count <= 0) {
             this.setActive(false);
-            this.node.opacity = 140; // опционально
+            this.node.opacity = 140; // optional
         } else {
             this.node.opacity = 255;
         }

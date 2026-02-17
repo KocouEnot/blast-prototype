@@ -10,13 +10,13 @@ export default class BoostersController extends cc.Component {
     private active: BoosterButton | null = null;
 
     onLoad(): void {
-        // подписываемся на клики каждой кнопки
+        // subscribe to clicks of each button
         for (const b of this.boosters) {
             if (!b) continue;
             b.node.off("booster-click", this.onBoosterClick, this);
             b.node.on("booster-click", this.onBoosterClick, this);
 
-            // на старте всё выключаем
+            // Turn everything off at startup
             b.setActive(false);
         }
         this.active = null;
@@ -25,23 +25,23 @@ export default class BoostersController extends cc.Component {
     private onBoosterClick(btn: BoosterButton): void {
         if (btn.getCount && btn.getCount() <= 0) return;
 
-        // если кликнули по активному — выключаем
+        // If you click on the active one, turn it off.
         if (this.active === btn) {
             btn.setActive(false);
             this.active = null;
 
-            this.node.emit("booster-changed", null); // <-- ДОБАВЬ
+            this.node.emit("booster-changed", null);
             return;
         }
 
-        // выключаем предыдущий
+        // turn off the previous one
         if (this.active) this.active.setActive(false);
 
-        // включаем новый
+        // we turn on the new one
         btn.setActive(true);
         this.active = btn;
 
-        this.node.emit("booster-changed", this.active); // <-- ДОБАВЬ
+        this.node.emit("booster-changed", this.active);
     }
 
     public getActive(): BoosterButton | null {
@@ -51,7 +51,7 @@ export default class BoostersController extends cc.Component {
     public clear(): void {
         if (this.active) this.active.setActive(false);
         this.active = null;
-        this.node.emit("booster-changed", null); // <-- ДОБАВЬ
+        this.node.emit("booster-changed", null);
     }
 
     public clearIfEmpty(btn: BoosterButton): void {

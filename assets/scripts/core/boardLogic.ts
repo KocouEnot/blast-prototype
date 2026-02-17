@@ -259,7 +259,7 @@ export default class BoardLogic {
             }
         }
 
-        // тасуем позиции (куда переедут типы/ноды)
+        // shuffle positions (where types/nodes will move)
         const dest = positions.slice();
         for (let i = dest.length - 1; i > 0; i--) {
             const j = (Math.random() * (i + 1)) | 0;
@@ -279,7 +279,7 @@ export default class BoardLogic {
             });
         }
 
-        // применяем перемешивание к model (тип "переезжает" вместе с нодой)
+        // we apply shuffling to the model (the type "moves" along with the node)
         const newGrid: TileType[][] = Array.from({ length: this.rows }, () => Array(this.cols).fill(0));
         for (let i = 0; i < mapping.length; i++) {
             const m = mapping[i];
@@ -309,7 +309,7 @@ export default class BoardLogic {
             this.shuffleCount += 1;
             shuffles.push(mapping);
 
-            // после shuffle проверим снова; если всё ещё нет ходов — цикл продолжится
+            // After shuffle, we'll check again; if there are still no moves, the cycle will continue.
         }
 
         return { shuffles, ended: false };
@@ -327,21 +327,15 @@ export default class BoardLogic {
 
     public clearCells(cells: CellPos[]): void {
         for (const { r, c } of cells) {
-            // если у тебя getType возвращает null/undefined на пустых — можно не проверять
-            // но на всякий случай:
             const v = this.getType(r, c);
             if (v === null || v === undefined) continue;
 
-            // Вариант A (самый частый): model хранит TileType | null
-            // и у него есть set(r,c,value)
             (this.model as any).set(r, c, null);
-
-            // Если у твоей model метод называется иначе — см. блок ниже
         }
     }
 
     public getBombCluster(centerR: number, centerC: number): CellPos[] {
-        // если клик по пустоте — игнор
+        // If you click on empty space, ignore
         const t = this.getType(centerR, centerC);
         if (t === null || t === undefined) return [];
 
@@ -353,7 +347,7 @@ export default class BoardLogic {
                 if (r < 0 || r >= this.rows || c < 0 || c >= this.cols) continue;
 
                 const v = this.getType(r, c);
-                if (v === null || v === undefined) continue; // не добавляем пустые
+                if (v === null || v === undefined) continue; // don't add empty ones
                 res.push({ r, c });
             }
         }
@@ -366,16 +360,16 @@ export default class BoardLogic {
         const cluster = this.getBombCluster(centerR, centerC);
         if (cluster.length === 0) return { kind: "ignored" };
 
-        // чистим
+        // we clean
         this.clearCells(cluster);
 
-        // +3 за каждый тайл
+        // +3 for each tile
         const gained = 3 * cluster.length;
         this.currentScore = Math.min(this.targetScore, this.currentScore + gained);
 
         if (!this.isWin && this.currentScore >= this.targetScore) {
             this.isWin = true;
-            this.isGameOver = true; // блокируем дальше (как у тебя сейчас)
+            this.isGameOver = true; // Let's continue blocking (like you have now)
         }
 
         return { kind: "bomb", cluster };
@@ -389,7 +383,7 @@ export default class BoardLogic {
                 const t = this.getType(r, c);
                 if (t === null || t === undefined) continue;
 
-                const cluster = this.findCluster(r, c); // у тебя уже есть
+                const cluster = this.findCluster(r, c);
                 if (cluster.length >= minSize) {
                     starts.push({ r, c });
                 }
@@ -426,7 +420,7 @@ export default class BoardLogic {
             visited[r][c] = true;
             result.push({ r, c });
 
-            // 4 направления
+            // 4 directions
             stack.push({ r: r + 1, c });
             stack.push({ r: r - 1, c });
             stack.push({ r, c: c + 1 });

@@ -279,7 +279,7 @@ export default class BoardView extends cc.Component {
 
         if (boosterId === "teleport") {
             await this.handleTeleportClick(r, c);
-            // важно: после бустера тоже перезапускаем таймер
+            // Important: After the booster, we also restart the timer
             this.resetHintTimer();
             return;
         }
@@ -332,7 +332,7 @@ export default class BoardView extends cc.Component {
             this.isBusy = false;
 
             if (shouldResetHint) {
-                this.resetHintTimer(); // ✅ теперь isBusy уже false, таймер реально ставится
+                this.resetHintTimer(); // ✅ now isBusy is false, the timer is actually set
             }
         }
     }
@@ -387,7 +387,7 @@ export default class BoardView extends cc.Component {
     private async animateGravityAndRefill(moves: GravityMove[], spawns: GravitySpawn[]): Promise<void> {
         const tweens: Promise<void>[] = [];
 
-        // 1) перемещения вниз
+        // 1) moving down
         for (const m of moves) {
             const node = this.nodes[m.fromR][m.c];
             this.nodes[m.fromR][m.c] = null;
@@ -411,7 +411,7 @@ export default class BoardView extends cc.Component {
             );
         }
 
-        // 2) спавн новых (падают внутри маски)
+        // 2) spawn new ones (fall inside the mask)
         for (const s of spawns) {
             const node = this.createTileNode(s.r, s.c, s.type);
             this.nodes[s.r][s.c] = node;
@@ -438,14 +438,14 @@ export default class BoardView extends cc.Component {
 
         await Promise.all(tweens);
 
-        // восстановим порядок отрисовки
+        // let's restore the drawing order
         this.reorderByRows();
     }
 
     private async animateShuffle(mapping: ShuffleMapping): Promise<void> {
         const tweens: Promise<void>[] = [];
 
-        // соберём новые позиции нод
+        // Let's collect new node positions
         const nextNodes: (cc.Node | null)[][] = Array.from({ length: this.rows }, () =>
             Array.from({ length: this.cols }, () => null)
         );
@@ -474,17 +474,17 @@ export default class BoardView extends cc.Component {
 
         await Promise.all(tweens);
 
-        // применяем новую матрицу
+        // we apply a new matrix
         this.nodes = nextNodes;
 
-        // восстановим порядок отрисовки: снизу вверх
+        // Let's restore the drawing order: from bottom to top
         this.reorderByRows();
     }
 
     private reorderByRows(): void {
         if (!this.cellsContainer) return;
 
-        // sibling index: сначала нижние ряды, затем верхние
+        // sibling index: bottom rows first, then top rows
         for (let r = this.rows - 1; r >= 0; r--) {
             for (let c = 0; c < this.cols; c++) {
                 const node = this.nodes[r][c];
@@ -494,7 +494,7 @@ export default class BoardView extends cc.Component {
     }
 
     private onBoosterChanged(activeBtn: BoosterButton | null): void {
-        // если выключили бустер или переключились на другой — сбрасываем выбор тайла
+        // If you turn off the booster or switch to another one, reset the tile selection
         if (!activeBtn || activeBtn.boosterId !== "teleport") {
             this.clearTeleportSelection();
         }
@@ -521,50 +521,48 @@ export default class BoardView extends cc.Component {
     private async handleTeleportClick(r: number, c: number): Promise<void> {
         if (this.isBusy) return;
         if (!this.logic.canInteract || (this.logic as any).canInteract && !(this.logic as any).canInteract()) {
-            // на случай если canInteract не экспортирован как public в logic
-            // если у тебя есть public canInteract() — оставь только её
         }
 
-        // нельзя выбирать пустое
+        // you can't select empty
         const t = this.logic.getType(r, c);
         if (t === null) return;
 
-        // 1) если первый тайл не выбран — выбираем
+        // 1) If the first tile is not selected, select it
         if (!this.teleportFirst) {
             this.teleportFirst = { r, c };
             this.setTileSelected(r, c, true);
             return;
         }
 
-        // 2) клик по тому же тайлу — снимаем выбор
+        // 2) Click on the same tile to deselect it.
         if (this.teleportFirst.r === r && this.teleportFirst.c === c) {
             this.clearTeleportSelection();
             return;
         }
 
-        // 3) второй тайл — делаем swap
+        // 3) second tile - we do a swap
         const a = this.teleportFirst;
         this.isBusy = true;
 
         try {
-            // снимаем визуал выбора первого
+            // we remove the visual of the first choice
             this.setTileSelected(a.r, a.c, false);
 
-            // логика: поменять типы в модели
+            // logic: change types in the model
             this.logic.swapCells(a.r, a.c, r, c);
 
-            // view: анимируем перестановку нод
+            // view: Animating the node reordering
             await this.animateSwapNodes(a.r, a.c, r, c);
 
-            // расходуем 1 бустер за успешный swap
+            // spend 1 booster for a successful swap
             const active = this.boosterController ? this.boosterController.getActive() : null;
             if (active) {
                 active.consumeOne();                 // -1
-                this.boosterController.clear();       // auto-off + вызовет booster-changed -> снимет выделение
-                this.boosterController.clearIfEmpty(active); // если стал 0 (на всякий)
+                this.boosterController.clear();       // auto-off + will call booster-changed -> deselect
+                this.boosterController.clearIfEmpty(active); // if it became 0 (just in case)
             }
 
-            // сброс
+            // reset
             this.teleportFirst = null;
 
             this.resetHintTimer();
@@ -581,11 +579,11 @@ export default class BoardView extends cc.Component {
         const n2 = this.nodes[r2][c2];
         if (!n1 || !n2) return;
 
-        // обновляем матрицу nodes
+        // updating the nodes matrix
         this.nodes[r1][c1] = n2;
         this.nodes[r2][c2] = n1;
 
-        // обновляем gridPos внутри TileView
+        // updating gridPos inside TileView
         const v1 = n1.getComponent(TileView);
         const v2 = n2.getComponent(TileView);
         if (v1) v1.setGridPos(r2, c2);
@@ -612,32 +610,29 @@ export default class BoardView extends cc.Component {
         if (this.isBusy) return;
         if (!this.logic) return;
 
-        // применяем бомбу в логике
+        // we apply the bomb to logic
         const res = this.logic.applyBomb(r, c);
         if (res.kind === "ignored") return;
 
         this.isBusy = true;
 
-        // UI: очки обновляем сразу (ходы не трогаем)
+        // UI: Update points immediately (leave moves alone)
         this.updateScoreLabel();
 
-        // анимация удаления 3×3
+        // 3x3 removal animation
         await this.animateRemoveCluster(res.cluster);
 
-        // гравитация + новые
+        // gravity + new
         const gravity = this.logic.applyGravityAndRefill();
         await this.animateGravityAndRefill(gravity.moves, gravity.spawns);
 
-        // ^ если у тебя уже есть отдельный метод анимации гравитации — вызывай его.
-        // Если нет — скажи как он называется в твоём текущем файле (я подставлю точное имя).
-
-        // если после хода нет доступных взрывов >=3 — делаем до 3 shuffle, иначе GameOver
+        // If after the move there are no available explosions >=3, we do a shuffle up to 3, otherwise GameOver
         const resShuffle = this.logic.ensurePlayableOrGameOver(3);
         for (const mapping of resShuffle.shuffles) {
             await this.animateShuffle(mapping);
         }
 
-        // потратить 1 бомбу и выключить
+        // spend 1 bomb and turn off
         const active = this.boosterController ? this.boosterController.getActive() : null;
         if (active) {
             active.consumeOne();
@@ -674,7 +669,7 @@ export default class BoardView extends cc.Component {
         if (this.logic.getIsGameOver?.() && this.logic.getIsGameOver()) return;
         if (this.logic.getIsWin?.() && this.logic.getIsWin()) return;
 
-        // scheduleOnce нельзя удобно отменять без ссылки, поэтому используем schedule + unschedule
+        // scheduleOnce can't be conveniently canceled without a reference, so we use schedule + unschedule
         this.scheduleOnce(this.onHintTimer, this.hintIdleSeconds);
         this.hintTimer = 1;
     }
@@ -700,7 +695,7 @@ export default class BoardView extends cc.Component {
         this.hintActive = true;
         this.hintNodes = [];
 
-        // собираем ноды
+        // we collect nodes
         for (const { r, c } of cluster) {
             const node = this.nodes?.[r]?.[c];
             if (!node || !cc.isValid(node)) continue;
@@ -713,7 +708,7 @@ export default class BoardView extends cc.Component {
             return;
         }
 
-        // пульсация
+        // pulsation
         for (const n of this.hintNodes) {
             n.stopAllActions();
             n.scale = 1;
