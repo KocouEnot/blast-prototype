@@ -380,4 +380,60 @@ export default class BoardLogic {
 
         return { kind: "bomb", cluster };
     }
+
+    public getRandomPlayableCluster(minSize: number = 3): CellPos[] | null {
+        const starts: CellPos[] = [];
+
+        for (let r = 0; r < this.rows; r++) {
+            for (let c = 0; c < this.cols; c++) {
+                const t = this.getType(r, c);
+                if (t === null || t === undefined) continue;
+
+                const cluster = this.findCluster(r, c); // у тебя уже есть
+                if (cluster.length >= minSize) {
+                    starts.push({ r, c });
+                }
+            }
+        }
+
+        if (starts.length === 0) return null;
+
+        const pick = starts[(Math.random() * starts.length) | 0];
+        const res = this.findCluster(pick.r, pick.c);
+        return res.length >= minSize ? res : null;
+    }
+
+    public findCluster(startR: number, startC: number): CellPos[] {
+        const startType = this.getType(startR, startC);
+        if (startType === null || startType === undefined) return [];
+
+        const visited: boolean[][] = Array.from({ length: this.rows }, () =>
+            Array.from({ length: this.cols }, () => false)
+        );
+
+        const stack: CellPos[] = [{ r: startR, c: startC }];
+        const result: CellPos[] = [];
+
+        while (stack.length > 0) {
+            const { r, c } = stack.pop()!;
+
+            if (r < 0 || r >= this.rows || c < 0 || c >= this.cols) continue;
+            if (visited[r][c]) continue;
+
+            const t = this.getType(r, c);
+            if (t !== startType) continue;
+
+            visited[r][c] = true;
+            result.push({ r, c });
+
+            // 4 направления
+            stack.push({ r: r + 1, c });
+            stack.push({ r: r - 1, c });
+            stack.push({ r, c: c + 1 });
+            stack.push({ r, c: c - 1 });
+        }
+
+        return result;
+    }
+
 }

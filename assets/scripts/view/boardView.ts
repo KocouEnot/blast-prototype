@@ -82,6 +82,15 @@ export default class BoardView extends cc.Component {
     @property
     tileSelectScale: number = 0.92;
 
+    @property
+    hintIdleSeconds: number = 5;
+
+    @property
+    hintPulseScale: number = 1.08;
+
+    @property
+    hintPulseDuration: number = 0.22;
+
     private logic: BoardLogic = null;
 
     private nodes: (cc.Node | null)[][] = [];
@@ -96,6 +105,11 @@ export default class BoardView extends cc.Component {
     private startX: number = 0;
 
     private teleportFirst: { r: number; c: number } | null = null;
+
+    private hintTimer: number | null = null;
+    private hintNodes: cc.Node[] = [];
+    private hintActive: boolean = false;
+
 
     start() {
         if (!this.tilePrefab || !this.cellsContainer) {
@@ -133,6 +147,8 @@ export default class BoardView extends cc.Component {
         this.updateScoreLabel();
 
         this.buildViewFromModel();
+
+        this.resetHintTimer();
 
         if (this.boosterController) {
             this.boosterController.node.off("booster-changed", this.onBoosterChanged, this);
@@ -255,16 +271,22 @@ export default class BoardView extends cc.Component {
         if (this.isBusy) return;
         if (!this.logic) return;
 
+        this.stopHint();
+        this.resetHintTimer();
+
         const activeBooster = this.boosterController ? this.boosterController.getActive() : null;
-        const boosterId = activeBooster ? activeBooster.boosterId : null; // как у тебя сейчас хранится id
+        const boosterId = activeBooster ? activeBooster.boosterId : null;
 
         if (boosterId === "teleport") {
             await this.handleTeleportClick(r, c);
+            // важно: после бустера тоже перезапускаем таймер
+            this.resetHintTimer();
             return;
         }
 
         if (boosterId === "bomb") {
             await this.handleBombClick(r, c);
+            this.resetHintTimer();
             return;
         }
 
@@ -278,38 +300,43 @@ export default class BoardView extends cc.Component {
         }
 
         this.isBusy = true;
+
+        let shouldResetHint = true;
+
         try {
-            // UI: moves/score update immediately (logic уже обновила)
             this.updateMovesLabel();
             this.updateScoreLabel();
 
-            // 1) анимация удаления (view)
             await this.animateRemoveCluster(res.cluster);
 
-            // 2) гравитация + refill (logic) -> анимация падения/спавна (view)
             const gravity = this.logic.applyGravityAndRefill();
             await this.animateGravityAndRefill(gravity.moves, gravity.spawns);
 
-            // 3) shuffle (logic) -> shuffle animation (view)
             const resShuffle = this.logic.ensurePlayableOrGameOver(3);
-
             for (const mapping of resShuffle.shuffles) {
                 await this.animateShuffle(mapping);
             }
 
-            // 4) overlay
             if (this.logic.getIsWin()) {
                 this.showOverlay("YOU WIN");
+                shouldResetHint = false;
                 return;
             }
+
             if (this.logic.getIsGameOver() || resShuffle.ended) {
                 this.showOverlay("GAME OVER");
+                shouldResetHint = false;
                 return;
             }
         } finally {
             this.isBusy = false;
+
+            if (shouldResetHint) {
+                this.resetHintTimer(); // ✅ теперь isBusy уже false, таймер реально ставится
+            }
         }
     }
+
 
     private showOverlay(text: string): void {
         if (!this.gameOverOverlay || !this.gameOverDim || !this.gameOverLabel) return;
@@ -539,8 +566,13 @@ export default class BoardView extends cc.Component {
 
             // сброс
             this.teleportFirst = null;
+
+            this.resetHintTimer();
         } finally {
             this.isBusy = false;
+
+            this.resetHintTimer();
+
         }
     }
 
@@ -626,5 +658,87 @@ export default class BoardView extends cc.Component {
         }
 
         this.isBusy = false;
+
+        this.resetHintTimer();
+
     }
+
+    private resetHintTimer(): void {
+        if (this.hintTimer !== null) {
+            this.unschedule(this.onHintTimer);
+            this.hintTimer = null;
+        }
+
+        if (!this.logic) return;
+        if (this.isBusy) return;
+        if (this.logic.getIsGameOver?.() && this.logic.getIsGameOver()) return;
+        if (this.logic.getIsWin?.() && this.logic.getIsWin()) return;
+
+        // scheduleOnce нельзя удобно отменять без ссылки, поэтому используем schedule + unschedule
+        this.scheduleOnce(this.onHintTimer, this.hintIdleSeconds);
+        this.hintTimer = 1;
+    }
+
+    private onHintTimer = (): void => {
+        this.hintTimer = null;
+
+        if (!this.logic) return;
+        if (this.isBusy) return;
+        if (this.logic.getIsGameOver?.() && this.logic.getIsGameOver()) return;
+        if (this.logic.getIsWin?.() && this.logic.getIsWin()) return;
+
+        this.showHint();
+    };
+
+    private showHint(): void {
+        if (!this.logic) return;
+        if (this.hintActive) return;
+
+        const cluster = this.logic.getRandomPlayableCluster(3);
+        if (!cluster || cluster.length < 3) return;
+
+        this.hintActive = true;
+        this.hintNodes = [];
+
+        // собираем ноды
+        for (const { r, c } of cluster) {
+            const node = this.nodes?.[r]?.[c];
+            if (!node || !cc.isValid(node)) continue;
+            this.hintNodes.push(node);
+        }
+
+        if (this.hintNodes.length < 3) {
+            this.hintActive = false;
+            this.hintNodes = [];
+            return;
+        }
+
+        // пульсация
+        for (const n of this.hintNodes) {
+            n.stopAllActions();
+            n.scale = 1;
+
+            cc.tween(n)
+                .repeatForever(
+                    cc.tween()
+                        .to(this.hintPulseDuration, { scale: this.hintPulseScale })
+                        .to(this.hintPulseDuration, { scale: 1 })
+                )
+                .start();
+        }
+    }
+
+    private stopHint(): void {
+        if (!this.hintActive) return;
+
+        for (const n of this.hintNodes) {
+            if (!n || !cc.isValid(n)) continue;
+            n.stopAllActions();
+            n.scale = 1;
+        }
+
+        this.hintNodes = [];
+        this.hintActive = false;
+    }
+
 }
