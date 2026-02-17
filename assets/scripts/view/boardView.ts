@@ -3,6 +3,8 @@ const { ccclass, property } = cc._decorator;
 import { TileType } from "../model/boardModel";
 import TileView from "./tileView";
 import BoardLogic, { CellPos, ShuffleMapping, GravityMove, GravitySpawn } from "../core/boardLogic";
+import BoosterController from "../core/boosterController";
+import BoosterButton from "../view/boosterButton";
 
 @ccclass
 export default class BoardView extends cc.Component {
@@ -29,6 +31,9 @@ export default class BoardView extends cc.Component {
 
     @property(cc.Label)
     scoreLabel: cc.Label = null;
+
+    @property(BoosterController)
+    boosterController: BoosterController = null;
 
     // how much higher than the top row new ones start (in pixels)
     @property
@@ -74,6 +79,9 @@ export default class BoardView extends cc.Component {
     @property
     shuffleDuration: number = 0.25;
 
+    @property
+    tileSelectScale: number = 0.92;
+
     private logic: BoardLogic = null;
 
     private nodes: (cc.Node | null)[][] = [];
@@ -86,6 +94,8 @@ export default class BoardView extends cc.Component {
     private boardWidth: number = 0;
     private boardHeight: number = 0;
     private startX: number = 0;
+
+    private teleportFirst: { r: number; c: number } | null = null;
 
     start() {
         if (!this.tilePrefab || !this.cellsContainer) {
@@ -123,6 +133,11 @@ export default class BoardView extends cc.Component {
         this.updateScoreLabel();
 
         this.buildViewFromModel();
+
+        if (this.boosterController) {
+            this.boosterController.node.off("booster-changed", this.onBoosterChanged, this);
+            this.boosterController.node.on("booster-changed", this.onBoosterChanged, this);
+        }
     }
 
     private updateMovesLabel(): void {
@@ -239,6 +254,19 @@ export default class BoardView extends cc.Component {
     private async onTileClick(r: number, c: number): Promise<void> {
         if (this.isBusy) return;
         if (!this.logic) return;
+
+        const activeBooster = this.boosterController ? this.boosterController.getActive() : null;
+        const boosterId = activeBooster ? activeBooster.boosterId : null; // как у тебя сейчас хранится id
+
+        if (boosterId === "teleport") {
+            await this.handleTeleportClick(r, c);
+            return;
+        }
+
+        if (boosterId === "bomb") {
+            await this.handleBombClick(r, c);
+            return;
+        }
 
         const res = this.logic.handleClick(r, c);
 
@@ -436,5 +464,167 @@ export default class BoardView extends cc.Component {
                 if (node) node.setSiblingIndex(this.cellsContainer.childrenCount - 1);
             }
         }
+    }
+
+    private onBoosterChanged(activeBtn: BoosterButton | null): void {
+        // если выключили бустер или переключились на другой — сбрасываем выбор тайла
+        if (!activeBtn || activeBtn.boosterId !== "teleport") {
+            this.clearTeleportSelection();
+        }
+    }
+
+    private setTileSelected(r: number, c: number, selected: boolean): void {
+        const node = this.nodes[r][c];
+        if (!node || !cc.isValid(node)) return;
+
+        node.stopAllActions();
+        const targetScale = selected ? this.tileSelectScale : 1;
+
+        cc.tween(node)
+            .to(0.08, { scale: targetScale })
+            .start();
+    }
+
+    private clearTeleportSelection(): void {
+        if (!this.teleportFirst) return;
+        this.setTileSelected(this.teleportFirst.r, this.teleportFirst.c, false);
+        this.teleportFirst = null;
+    }
+
+    private async handleTeleportClick(r: number, c: number): Promise<void> {
+        if (this.isBusy) return;
+        if (!this.logic.canInteract || (this.logic as any).canInteract && !(this.logic as any).canInteract()) {
+            // на случай если canInteract не экспортирован как public в logic
+            // если у тебя есть public canInteract() — оставь только её
+        }
+
+        // нельзя выбирать пустое
+        const t = this.logic.getType(r, c);
+        if (t === null) return;
+
+        // 1) если первый тайл не выбран — выбираем
+        if (!this.teleportFirst) {
+            this.teleportFirst = { r, c };
+            this.setTileSelected(r, c, true);
+            return;
+        }
+
+        // 2) клик по тому же тайлу — снимаем выбор
+        if (this.teleportFirst.r === r && this.teleportFirst.c === c) {
+            this.clearTeleportSelection();
+            return;
+        }
+
+        // 3) второй тайл — делаем swap
+        const a = this.teleportFirst;
+        this.isBusy = true;
+
+        try {
+            // снимаем визуал выбора первого
+            this.setTileSelected(a.r, a.c, false);
+
+            // логика: поменять типы в модели
+            this.logic.swapCells(a.r, a.c, r, c);
+
+            // view: анимируем перестановку нод
+            await this.animateSwapNodes(a.r, a.c, r, c);
+
+            // расходуем 1 бустер за успешный swap
+            const active = this.boosterController ? this.boosterController.getActive() : null;
+            if (active) {
+                active.consumeOne();                 // -1
+                this.boosterController.clear();       // auto-off + вызовет booster-changed -> снимет выделение
+                this.boosterController.clearIfEmpty(active); // если стал 0 (на всякий)
+            }
+
+            // сброс
+            this.teleportFirst = null;
+        } finally {
+            this.isBusy = false;
+        }
+    }
+
+    private async animateSwapNodes(r1: number, c1: number, r2: number, c2: number): Promise<void> {
+        const n1 = this.nodes[r1][c1];
+        const n2 = this.nodes[r2][c2];
+        if (!n1 || !n2) return;
+
+        // обновляем матрицу nodes
+        this.nodes[r1][c1] = n2;
+        this.nodes[r2][c2] = n1;
+
+        // обновляем gridPos внутри TileView
+        const v1 = n1.getComponent(TileView);
+        const v2 = n2.getComponent(TileView);
+        if (v1) v1.setGridPos(r2, c2);
+        if (v2) v2.setGridPos(r1, c1);
+
+        const p1 = this.cellPos(r1, c1);
+        const p2 = this.cellPos(r2, c2);
+
+        await Promise.all([
+            new Promise<void>((resolve) => {
+                if (!cc.isValid(n1)) return resolve();
+                cc.tween(n1).to(0.18, { x: p2.x, y: p2.y }).call(resolve).start();
+            }),
+            new Promise<void>((resolve) => {
+                if (!cc.isValid(n2)) return resolve();
+                cc.tween(n2).to(0.18, { x: p1.x, y: p1.y }).call(resolve).start();
+            }),
+        ]);
+
+        this.reorderByRows();
+    }
+
+    private async handleBombClick(r: number, c: number): Promise<void> {
+        if (this.isBusy) return;
+        if (!this.logic) return;
+
+        // применяем бомбу в логике
+        const res = this.logic.applyBomb(r, c);
+        if (res.kind === "ignored") return;
+
+        this.isBusy = true;
+
+        // UI: очки обновляем сразу (ходы не трогаем)
+        this.updateScoreLabel();
+
+        // анимация удаления 3×3
+        await this.animateRemoveCluster(res.cluster);
+
+        // гравитация + новые
+        const gravity = this.logic.applyGravityAndRefill();
+        await this.animateGravityAndRefill(gravity.moves, gravity.spawns);
+
+        // ^ если у тебя уже есть отдельный метод анимации гравитации — вызывай его.
+        // Если нет — скажи как он называется в твоём текущем файле (я подставлю точное имя).
+
+        // если после хода нет доступных взрывов >=3 — делаем до 3 shuffle, иначе GameOver
+        const resShuffle = this.logic.ensurePlayableOrGameOver(3);
+        for (const mapping of resShuffle.shuffles) {
+            await this.animateShuffle(mapping);
+        }
+
+        // потратить 1 бомбу и выключить
+        const active = this.boosterController ? this.boosterController.getActive() : null;
+        if (active) {
+            active.consumeOne();
+            this.boosterController.clear();        // auto-off
+            this.boosterController.clearIfEmpty(active);
+        }
+
+        // overlays
+        if (this.logic.getIsWin()) {
+            this.showOverlay("YOU WIN");
+            this.isBusy = false;
+            return;
+        }
+        if (this.logic.getIsGameOver() || resShuffle.ended) {
+            this.showOverlay("GAME OVER");
+            this.isBusy = false;
+            return;
+        }
+
+        this.isBusy = false;
     }
 }

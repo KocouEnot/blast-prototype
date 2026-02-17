@@ -34,6 +34,10 @@ export type ShuffleMove = { fromR: number; fromC: number; toR: number; toC: numb
 
 export type ShuffleMapping = ShuffleMove[];
 
+export type BombResult =
+    | { kind: "ignored" }
+    | { kind: "bomb"; cluster: CellPos[] };
+
 @ccclass
 export default class BoardLogic {
     private model: BoardModel = null;
@@ -309,5 +313,71 @@ export default class BoardLogic {
         }
 
         return { shuffles, ended: false };
+    }
+
+    public swapCells(r1: number, c1: number, r2: number, c2: number): void {
+        const a = this.model.get(r1, c1) as TileType | null;
+        const b = this.model.get(r2, c2) as TileType | null;
+
+        if (a === null || b === null) return;
+
+        this.model.set(r1, c1, b);
+        this.model.set(r2, c2, a);
+    }
+
+    public clearCells(cells: CellPos[]): void {
+        for (const { r, c } of cells) {
+            // если у тебя getType возвращает null/undefined на пустых — можно не проверять
+            // но на всякий случай:
+            const v = this.getType(r, c);
+            if (v === null || v === undefined) continue;
+
+            // Вариант A (самый частый): model хранит TileType | null
+            // и у него есть set(r,c,value)
+            (this.model as any).set(r, c, null);
+
+            // Если у твоей model метод называется иначе — см. блок ниже
+        }
+    }
+
+    public getBombCluster(centerR: number, centerC: number): CellPos[] {
+        // если клик по пустоте — игнор
+        const t = this.getType(centerR, centerC);
+        if (t === null || t === undefined) return [];
+
+        const res: CellPos[] = [];
+        for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+                const r = centerR + dr;
+                const c = centerC + dc;
+                if (r < 0 || r >= this.rows || c < 0 || c >= this.cols) continue;
+
+                const v = this.getType(r, c);
+                if (v === null || v === undefined) continue; // не добавляем пустые
+                res.push({ r, c });
+            }
+        }
+        return res;
+    }
+
+    public applyBomb(centerR: number, centerC: number): BombResult {
+        if (this.isGameOver || this.isWin) return { kind: "ignored" };
+
+        const cluster = this.getBombCluster(centerR, centerC);
+        if (cluster.length === 0) return { kind: "ignored" };
+
+        // чистим
+        this.clearCells(cluster);
+
+        // +3 за каждый тайл
+        const gained = 3 * cluster.length;
+        this.currentScore = Math.min(this.targetScore, this.currentScore + gained);
+
+        if (!this.isWin && this.currentScore >= this.targetScore) {
+            this.isWin = true;
+            this.isGameOver = true; // блокируем дальше (как у тебя сейчас)
+        }
+
+        return { kind: "bomb", cluster };
     }
 }

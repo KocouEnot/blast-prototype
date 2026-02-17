@@ -23,21 +23,25 @@ export default class BoostersController extends cc.Component {
     }
 
     private onBoosterClick(btn: BoosterButton): void {
+        if (btn.getCount && btn.getCount() <= 0) return;
+
         // если кликнули по активному — выключаем
         if (this.active === btn) {
             btn.setActive(false);
             this.active = null;
+
+            this.node.emit("booster-changed", null); // <-- ДОБАВЬ
             return;
         }
 
         // выключаем предыдущий
-        if (this.active) {
-            this.active.setActive(false);
-        }
+        if (this.active) this.active.setActive(false);
 
         // включаем новый
         btn.setActive(true);
         this.active = btn;
+
+        this.node.emit("booster-changed", this.active); // <-- ДОБАВЬ
     }
 
     public getActive(): BoosterButton | null {
@@ -47,5 +51,13 @@ export default class BoostersController extends cc.Component {
     public clear(): void {
         if (this.active) this.active.setActive(false);
         this.active = null;
+        this.node.emit("booster-changed", null); // <-- ДОБАВЬ
+    }
+
+    public clearIfEmpty(btn: BoosterButton): void {
+        if (!btn) return;
+        if (btn.getCount && btn.getCount() <= 0) {
+            if (this.active === btn) this.clear();
+        }
     }
 }

@@ -6,6 +6,9 @@ export default class BoosterButton extends cc.Component {
     @property([cc.Node])
     glowParts: cc.Node[] = [];
 
+    @property(cc.Label)
+    countLabel: cc.Label = null;
+
     // Можно добавить лёгкое свечение/прозрачность
     @property
     glowOpacityOn: number = 230;
@@ -20,13 +23,23 @@ export default class BoosterButton extends cc.Component {
     @property
     pressDuration: number = 0.06;
 
+    @property
+    boosterId: string = ''; // teleport or bomb
+
+    @property
+    startCount: number = 5;
+
     private _isActive: boolean = false;
     private _baseScaleX: number = 1;
     private _baseScaleY: number = 1;
+    private count: number = 0;
 
     onLoad(): void {
         this._baseScaleX = this.node.scaleX;
         this._baseScaleY = this.node.scaleY;
+
+        this.count = this.startCount;
+        this.refreshCount();
 
         // стартовое состояние glow
         this.setGlow(false, true);
@@ -53,6 +66,7 @@ export default class BoosterButton extends cc.Component {
     }
 
     private onClick(): void {
+        if (this.count <= 0) return;
         this.node.emit("booster-click", this);
     }
 
@@ -87,6 +101,29 @@ export default class BoosterButton extends cc.Component {
                     .to(this.glowFadeDuration, { opacity: targetOpacity })
                     .start();
             }
+        }
+    }
+
+    public getCount(): number {
+        return this.count;
+    }
+
+    public consumeOne(): boolean {
+        if (this.count <= 0) return false;
+        this.count -= 1;
+        this.refreshCount();
+        return true;
+    }
+
+    private refreshCount(): void {
+        if (this.countLabel) this.countLabel.string = String(this.count);
+
+        // если кончились — визуально можно "задимить", но не обязательно
+        if (this.count <= 0) {
+            this.setActive(false);
+            this.node.opacity = 140; // опционально
+        } else {
+            this.node.opacity = 255;
         }
     }
 }
